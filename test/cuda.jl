@@ -193,3 +193,32 @@ end
     @test all(dA .≈ (2:2:64))
     @test all(dA2 .≈ 3*(2:2:64))
 end
+
+function broadcast_type_loss(W, x, y)
+    pred = W * x
+    nclasses = size(pred, 1)
+    classes = reshape(Int32(1):Int32(nclasses), :, 1)
+    y_idx = reshape(Int32.(y), 1, :)
+    y_oh = Float32.(classes .== y_idx)
+    return sum(y_oh .* pred)
+end
+
+@testset "Broadcasted Type function field" begin
+    W = CUDA.randn(Float32, 3, 5)
+    x = CUDA.randn(Float32, 5, 32)
+    y = CUDA.CuArray(Int32.(rand(1:3, 32)))
+
+    dW = CUDA.zeros(Float32, size(W))
+    dx = CUDA.zeros(Float32, size(x))
+
+    Enzyme.autodiff(
+        Reverse,
+        broadcast_type_loss,
+        Duplicated(W, dW),
+        Duplicated(x, dx),
+        Const(y),
+    )
+
+    @test all(isfinite, dW)
+    @test all(isfinite, dx)
+end

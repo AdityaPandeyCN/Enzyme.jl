@@ -1964,7 +1964,7 @@ function zero_single_allocation(builder::LLVM.IRBuilder, @nospecialize(jlType::D
             desc = Base.DataTypeFieldDesc(jlty)
             for ii = 1:fieldcount(jlty)
                 jlet = typed_fieldtype(jlty, ii)
-                if isghostty(jlet) || Core.Compiler.isconstType(jlet)
+                if desc[ii].size == 0
                     continue
                 end
 
