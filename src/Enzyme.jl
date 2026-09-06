@@ -388,6 +388,10 @@ Enzyme.autodiff(ReverseWithPrimal, x->x*x, Active(3.0))
     Nargs,
     ErrIfFuncWritten,
 }
+    # Enzyme.shrink's capture; `!within_autodiff()` first so Enzyme's interpreter removes the branch, and autodiff_deferred unhooked as GPU kernels cannot read a host global
+    if !within_autodiff() && Shrink.CAPTURING[]
+        Shrink.describe_call(mode, f, A0, args...)
+    end
     tt′ = vaTypeof(args...)
     width = same_or_one(1, args...)
     if width == 0
@@ -629,6 +633,9 @@ f(x) = x*x
     FA<:Annotation,
     A<:Annotation,
 } where {ReturnPrimal,RABI<:ABI,Nargs,ErrIfFuncWritten,RuntimeActivity,StrongZero}
+    if !within_autodiff() && Shrink.CAPTURING[]        # see the reverse-mode method
+        Shrink.describe_call(mode, f, A, args...)
+    end
     if any_active(args...)
         throw(ErrorException("Active arguments not allowed in forward mode"))
     end
@@ -1530,6 +1537,32 @@ result, ∂v, ∂A
 end
 
 include("sugar.jl")
+
+"""
+    shrink(file; isolate = false, timeout = nothing, workers = 1)
+
+Reduce the first failing `autodiff` call in the script `file` to a minimal reproducer.
+
+Return the path of `repro.jl`, written to a `shrink_<time>` directory next to the script and
+rewritten after every accepted cut, or `nothing` if no call failed. The directory also holds
+`original.jl`, `typed_ir.txt` (the typed IR of the method Enzyme blames), every candidate as
+`<n>.jl` with its output in `<n>.log`, and under `values/` any argument that cannot be written
+as source.
+
+A derivative that disagrees with central finite differences of the function counts as a
+failure when the values differentiated are real floats or arrays; such a repro ends in
+`Enzyme.Shrink.check`. Only the script's own code and its literal `include`s are reduced: code
+in packages is not cut and a macro call is kept or removed whole.
+
+- `isolate`: run the script and every candidate in a child Julia process, so that a crash or
+  hang is a result rather than the end of the session. Without it there is no timeout.
+- `timeout`: seconds before a candidate is killed; by default five times the original run and
+  at least 60.
+- `workers`: number of children trying candidates at once; implies `isolate`.
+"""
+function shrink end
+
+include("shrink.jl")
 
 function _import_frule end # defined in EnzymeChainRulesCoreExt extension
 
