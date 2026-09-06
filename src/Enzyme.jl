@@ -388,6 +388,10 @@ Enzyme.autodiff(ReverseWithPrimal, x->x*x, Active(3.0))
     Nargs,
     ErrIfFuncWritten,
 }
+    # Enzyme.shrink's capture; `!within_autodiff()` first so Enzyme's interpreter removes the branch, and autodiff_deferred unhooked as GPU kernels cannot read a host global
+    if !within_autodiff() && Shrink.CAPTURING[]
+        Shrink.describe_call(mode, f, A0, args...)
+    end
     tt′ = vaTypeof(args...)
     width = same_or_one(1, args...)
     if width == 0
@@ -629,6 +633,9 @@ f(x) = x*x
     FA<:Annotation,
     A<:Annotation,
 } where {ReturnPrimal,RABI<:ABI,Nargs,ErrIfFuncWritten,RuntimeActivity,StrongZero}
+    if !within_autodiff() && Shrink.CAPTURING[]        # see the reverse-mode method
+        Shrink.describe_call(mode, f, A, args...)
+    end
     if any_active(args...)
         throw(ErrorException("Active arguments not allowed in forward mode"))
     end
@@ -1530,6 +1537,38 @@ result, ∂v, ∂A
 end
 
 include("sugar.jl")
+
+"""
+    shrink(file; isolate = false, timeout = nothing, workers = 1) -> path or nothing
+
+Reduce the first failing `autodiff` call in the script `file` to a minimal reproducer, written
+to `shrink_<time>/repro.jl` next to the script and rewritten after every accepted cut, so the
+run can be stopped as soon as it is small enough; `nothing` if no call failed.  The directory
+also holds `original.jl` (the call as captured), `typed_ir.txt` (the typed IR of the method
+Enzyme blames, when it blames one), every candidate tried as `<n>.jl` with its output in
+`<n>.log`, each accepted step under `checkpoints/`, and under `values/` any argument that
+cannot be written as source, serialised, which the repro reads back.
+
+Every `autodiff` call the script makes is captured, including those inside `gradient` and
+`hvp`, and a cut is kept only while the program fails the same way.  A derivative disagreeing
+with central finite differences of the function is a failure too, when the values differentiated
+are real floating-point numbers or arrays; such a repro ends in `Enzyme.Shrink.check(...)`,
+`autodiff` followed by that comparison.  The repro's header says whether the failure survives
+runtime activity, strong zero and the inline ABI, and what the program does without each
+remaining statement and active argument.  Only the script's own code (and files it `include`s
+by a literal path) is reduced, macros expanded when that lets more of it be cut; a closure's
+captured variables become inputs.
+
+Everything runs in this process unless `isolate` is set: the script and every candidate then
+run in a child Julia process, kept warm between candidates and replaced when one kills it, so
+a failure that aborts the process or hangs is a result like any other.  The child is killed
+after `timeout` seconds, by default five times the original's own run and at least 60.  With
+`workers > 1`, that many children try candidates at once; each needs the memory of one Enzyme
+compilation of the program.
+"""
+function shrink end
+
+include("shrink.jl")
 
 function _import_frule end # defined in EnzymeChainRulesCoreExt extension
 
